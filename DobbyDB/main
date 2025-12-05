@@ -1,0 +1,102 @@
+#!/bin/bash
+
+echo -e "\033[94m"
+
+
+cat << EOF | awk 'NR==11 {print "\033[33m" $0 "\033[0m"; next}1'
+
+
+    _____        _     _           _____  ____  
+   |  __ \      | |   | |         |  __ \|  _ \ 
+   | |  | | ___ | |__ | |__  _   _| |  | | |_) |
+   | |  | |/ _ \| '_ \| '_ \| | | | |  | |  _ < 
+   | |__| | (_) | |_) | |_) | |_| | |__| | |_) |
+   |_____/ \___/|_.__/|_.__/ \__, |_____/|____/ 
+                              __/ |             
+                             |___/   "Dobby has no master! Dobby is a free elf, and Dobby has come to save Harry Potter and his friends!" 
+										           • By Salma Hamed Algayar & Farida Emad Eldin •
+
+
+EOF
+
+
+
+sleep 0.5
+
+IFS=""
+
+current_db=''
+
+while true; do
+	echo ""
+	buff=''
+	IFS=""	
+	prompt=$(echo -e "\033[97;104m DobbyDB \033[31;104m♥\033[0m\033[30;104m $current_db \033[0m\033[31;104m♥\033[0m\033[31;104m  \033[0m  ")
+	tmp_prompt=$(printf "%$(( ${#prompt} - 61 ))s")
+	while IFS= read -e -p $prompt -r line; do
+		prompt="$tmp_prompt"
+		line=$(echo $line | sed 's/^[ \t]*//;s/[ \t]*$//')
+		buff+="$line "
+		[[ $line == "bye bye" ]] && exit;
+		[[ $line == *";" ]] && break;
+	done
+
+	query=$(echo "${buff::-2}" | sed 's/^[ \t]*//;s/[ \t]*$//')
+	query=$(echo $query | sed "s/(/ (/g" | tr -s " " | sed "s/ ,/,/g" | sed "s/, /,/g" | sed "s/( /(/g" | sed "s/ )/)/g")
+	#query=$(echo $query | sed -E 's/[[:space:]]*([<!>]=?|=)[[:space:]]*/ \1 /g')
+
+	query=$(echo "$query" | sed -E 's/[[:space:]]*(=<|>=|<=|!=|<>|=|<|>)[[:space:]]*/ \1 /g')
+
+	echo 
+
+	shopt -s nocasematch
+	case "$query" in
+		use\ *)
+			tmp_db=$(./use_database $query)
+			word_count=$(echo "$tmp_db" | wc -w)
+			if [ "$word_count" -eq 1 ]; then
+			     current_db=$tmp_db
+		        else
+			     echo -e "\033[30;41mError: Database does not exist, Sir!\033[0m"
+			fi
+			;;
+		create\ database\ *)
+			./create_database $query
+			;;
+		drop\ database\ *)
+			./drop_database $query
+			current_db=''
+			;;
+		show\ databases)
+			./show_database $query
+			;;
+		create\ table\ *)
+			./create_table $query $current_db
+			;;
+		insert\ into\ *)
+			./insert_record $query $current_db
+			;;
+		delete\ from\ *)
+			./delete_records $query $current_db
+			;;
+		update\ *)
+			./update_record $query $current_db
+			;;
+		select\ *)
+			./select_record $query $current_db
+			;;
+		show\ tables)
+			./show_table $query $current_db
+			;;
+		drop\ table\ *)
+			./drop_table $query $current_db
+			;;
+		*)
+			echo -e "\033[30;41mInvalid Query, Sir!\033[0m"
+	esac
+done
+: END COMMENT '
+'
+END COMMENT
+
+

@@ -1,0 +1,88 @@
+#!/bin/bash
+
+is_primary_key() {
+    local colName="$1"
+    local tableName="$2"
+    local current_db="$3"
+    local metaFile=".${tableName}"
+
+    if [[ ! -f "./$current_db/$metaFile" ]]; then
+        echo -e "\033[30;41mError: The metadata file of table ($tableName) is not found, Sir!\033[0m"
+        return 1
+    fi
+
+    # Read names and constraints
+    IFS=':' read -ra metaColNames < <(sed -n '1p' "./$current_db/$metaFile")
+    IFS=':' read -ra metaConstraint < <(sed -n '3p' "./$current_db/$metaFile")
+
+    # Normalize input column name
+    local colName_lc="${colName,,}"
+
+    # Find index (case-insensitive)
+    local index=-1
+    for i in "${!metaColNames[@]}"; do
+        if [[ "${metaColNames[$i],,}" == "$colName_lc" ]]; then
+            index=$i
+            break
+        fi
+    done
+
+    if [[ $index -eq -1 ]]; then
+        echo -e "\033[30;41mError: Column ($colName) not found, Sir!\033[0m"
+        return 1
+    fi
+
+    # Check primary key flag
+    if [[ "${metaConstraint[$index],,}" == "1" ]]; then
+        return 0     # is primary key
+    else
+        return 1     # not primary key
+    fi
+}
+
+# Call for testing
+is_primary_key "$1" "$2" "$3"
+#!/bin/bash
+
+is_primary_key() {
+    local colName="$1"
+    local tableName="$2"
+    local current_db="$3"
+    local metaFile=".${tableName}"
+
+    if [[ ! -f "./$current_db/$metaFile" ]]; then
+        echo -e "\033[30;41mError: The metadata file of table ($tableName) is not found, Sir!\033[0m"
+        return 1
+    fi
+
+    # Read names and constraints
+    IFS=':' read -ra metaColNames < <(sed -n '1p' "./$current_db/$metaFile")
+    IFS=':' read -ra metaConstraint < <(sed -n '3p' "./$current_db/$metaFile")
+
+    # Normalize input column name
+    local colName_lc="${colName,,}"
+
+    # Find index (case-insensitive)
+    local index=-1
+    for i in "${!metaColNames[@]}"; do
+        if [[ "${metaColNames[$i],,}" == "$colName_lc" ]]; then
+            index=$i
+            break
+        fi
+    done
+
+    if [[ $index -eq -1 ]]; then
+        echo -e "\033[30;41mError: Column ($colName) not found, Sir!\033[0m"
+        return 1
+    fi
+
+    # Check primary key flag
+    if [[ "${metaConstraint[$index],,}" == "1" ]]; then
+        return 0     # is primary key
+    else
+        return 1     # not primary key
+    fi
+}
+
+# Call for testing
+is_primary_key "$1" "$2" "$3"

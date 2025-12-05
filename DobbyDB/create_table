@@ -1,0 +1,134 @@
+#!/bin/bash
+
+current_db="$2"
+if [[ $current_db == '' ]]; then
+	echo -e "\033[30;41mError: Database is not selected, Sir!\033[0m"
+	exit
+fi
+
+
+is_invalid_name() {
+	    local str="$*"
+	    if [[ $str =~ ^[0-9] || $str =~ [[:space:]] || $str =~ [^a-zA-Z0-9_] ]]; then
+		    echo -e "\033[30;41mError: Invalid Naming ($str), Sir!\033[0m"
+		    exit
+	    fi
+    }
+
+is_valid_datatype() {
+	    local dtype="$1"
+	    dtype="${dtype,,}"
+	    if [[ ! ("$dtype" == "int" || "$dtype" == "varchar" || "$dtype" == "float") ]]; then
+		    echo -e "\033[30;41mError: Invalid Datatype ($dtype), Sir!\033[0m"
+		    exit
+	    fi
+    }
+
+column_exists() {
+	local -n arr="$1"
+	local target="$2"
+
+	target=$(echo "$target" | tr '[:upper:]' '[:lower:]')
+
+	for col in "${arr[@]}"; do
+		col=$(echo "$col" | tr '[:upper:]' '[:lower:]')
+		if [[ "$col" == "$target" ]]; then
+			echo -e "\033[30;41mError: Repeated Column Name ($target), Sir!\033[0m"
+			exit
+		fi
+	done
+   }
+
+
+table_exists() {
+	local arr=( $(find ./$current_db -maxdepth 1 -type f -printf "%f\n") )
+	local target="$1"
+
+	target=$(echo "$target" | tr '[:upper:]' '[:lower:]')
+
+	for col in "${arr[@]}"; do
+		col=$(echo "$col" | tr '[:upper:]' '[:lower:]')
+		if [[ "$col" == "$target" ]]; then
+			echo -e "\033[30;41mError: Table ($target) already exists, Sir!\033[0m"
+			exit
+		fi
+	done
+   }
+
+
+create_table_query="$1"
+create_table_lower=$(echo $create_table_query | tr '[:upper:]' '[:lower:]')
+
+if [[ $create_table_lower == "create table "* ]]; then
+
+	table_name=$(echo $create_table_query | awk '{print $3}')
+	is_invalid_name $table_name
+	table_exists $table_name
+
+	columns=$(echo "$create_table_query" | awk '{ $1=""; $2=""; $3=""; sub(/^ +/, ""); print }')
+
+	if [[ ! $columns =~ ^\(.*\)$ ]]; then
+		echo -e "\033[30;41mError: Check your Syntax, Sir!\033[0m"
+		exit
+	fi
+
+	clean=${columns#(}
+	clean=${clean%)}
+
+
+	col_names=()
+	col_types=()
+	constraints=()
+
+	IFS=',' read -ra cols <<< "$clean"
+
+	declare -i pk=-1
+	for line in "${cols[@]}"; do
+		name=$(echo "$line" | awk '{print $1}')
+		is_invalid_name $name
+		column_exists col_names $name
+		
+		type=$(echo "$line" | awk '{print $2}')
+		is_valid_datatype $type
+
+		constraint=$(echo "$line" | awk '{ $1=""; $2=""; sub(/^ +/, ""); print }')
+		constraint_lower=$(echo "$constraint" | tr '[:upper:]' '[:lower:]')
+
+		if [[ ! ("$constraint_lower" == "primary key" || -z $constraint) ]]; then
+			echo -e "\033[30;41mError: Invalid Constraint ($constraint), Sir!\033[0m"
+			exit
+		elif [[ "$constraint_lower" == "primary key" ]]; then
+			constraint=1
+			pk+=1
+		else
+			constraint=0
+		fi
+
+		if [[ $pk > 0 ]]; then
+			echo -e "\033[30;41mError: No more than one primary key, Sir!\033[0m"
+			exit
+		fi
+
+
+		col_names+=("$name")
+		col_types+=("$type")
+		constraints+=("$constraint")
+	done
+
+	if [[ $pk == -1 ]]; then
+		echo -e "\033[30;41mError: Table does not have a primary key, Sir!\033[0m"
+		exit
+	fi
+
+	touch "./$current_db/$table_name" "./$current_db/.$table_name"
+
+	(IFS=":"; echo "${col_names[*]}") > "./$current_db/.$table_name"
+	(IFS=":"; echo "${col_types[*]}") >> "./$current_db/.$table_name"
+	(IFS=":"; echo "${constraints[*]}") >> "./$current_db/.$table_name"
+
+	echo -e "\033[30;42mTable ($table_name) created successfully, Sir!\033[0m"
+else
+	echo -e "\033[30;41mError: Check your Syntax, Sir!\033[0m"
+	exit
+fi
+

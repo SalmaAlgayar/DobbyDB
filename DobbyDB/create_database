@@ -1,0 +1,46 @@
+#!/bin/bash
+
+fullQuery=$1
+
+read -ra words <<< "$fullQuery"
+wordCount=${#words[@]}
+
+database=0
+if [[ ${words[0],,} == "create" ]]
+then
+	if [[  ${words[1],,} == "database"  && $wordCount -eq 3 ]]
+	then
+		exist=0
+		dirs=( $(find . -maxdepth 1 -type d -printf "%f\n") )
+		for dir in ${dirs[@]}
+		do
+			echo 
+			if [[ "${words[2],,}" = "${dir,,}" ]]
+			then
+				exist=1
+				break
+			fi
+		done
+		if [ $exist -eq 0 ]
+		then
+			if [[  ${words[2],,} =~ ^[0-9] ||  ${words[2],,} =~ [[:space:]] ||  ${words[2],,} =~ [^a-zA-Z0-9_] ]]
+			then
+				echo -e "\033[30;41mError: Invalid name for a database, Sir!\033[0m"
+				exit
+			fi
+			mkdir "${words[2],,}"
+			echo -e "\033[30;42mDatabase created successfully, Sir!\033[0m"
+		else
+		
+			echo -e "\033[30;41mError: Database already exists, Sir!\033[0m"
+		fi
+	else
+		echo -e "\033[30;41mError: Check your Syntax, Sir!\033[0m"
+	fi
+
+else
+	echo -e "\033[30;41mError: Check your Syntax, Sir!\033[0m"
+fi
+
+
+

@@ -1,0 +1,349 @@
+#!/bin/bash
+
+current_db="$2"
+if [[ $current_db == '' ]]; then
+	echo -e "\033[30;41mError: Database is not selected, Sir!\033[0m"
+	exit
+fi
+
+get_column_datatype() {
+    local metadataFile="$1"
+    local target="$2"
+
+    target=$(echo "$target" | tr '[:upper:]' '[:lower:]')
+    IFS=':' read -ra cols < <(sed -n '1p' "./$current_db/$metadataFile")
+    IFS=':' read -ra types < <(sed -n '2p' "./$current_db/$metadataFile")
+
+    for i in "${!cols[@]}"; do
+        col="${cols[$i]}"
+        col=$(echo "$col" | tr '[:upper:]' '[:lower:]')
+
+        if [[ "$col" == "$target" ]]; then
+            echo "${types[$i]}"
+	    return 0
+        fi
+    done
+
+    echo -e "\033[30;41mError: Column ($target) not found, Sir!\033[0m"
+    exit
+}
+
+
+
+
+get_column_index() {
+    local metadataFile="$1"
+    local target="$2"
+    target=$(echo "$target" | tr '[:upper:]' '[:lower:]')
+
+    IFS=':' read -ra cols < <(sed -n '1p' "./$current_db/$metadataFile")
+
+    for i in "${!cols[@]}"; do
+        col="${cols[$i]}"
+        col=$(echo "$col" | tr '[:upper:]' '[:lower:]')
+
+	if [[ "$col" == ' ' || "$col" == '' ]];then
+		echo -e "\033[30;41mError: Column ($target) not found, Sir!\033[0m"
+		break
+		exit
+	fi
+
+        if [[ "$col" == "$target" ]]; then
+		echo "$((i+1))"
+		return 0
+        fi
+    done
+
+    echo -e "\033[30;41mError: Column ($target) not found, Sir!\033[0m"
+    exit
+}
+
+
+
+column_exists() {
+        local -n arr="$1"
+        local target="$2"
+        local not_found=1
+
+        target=$(echo "$target" | tr '[:upper:]' '[:lower:]')
+
+        for col in "${arr[@]}"; do
+                col=$(echo "$col" | tr '[:upper:]' '[:lower:]')
+                if [[ "$col" == "$target" ]]; then
+                        not_found=0
+                        break
+                fi
+
+        done
+        if [[ $not_found == 1 ]]; then
+		echo -e "\033[30;41mError: Column ($target) is not found, Sir!\033[0m"
+                exit
+        fi
+}
+
+
+
+is_valid_datatype() {
+	    local dtype="$1"
+	    dtype="${dtype,,}"
+	    if [[ ! ("$dtype" == "int" || "$dtype" == "varchar" || "$dtype" == "float") ]]; then
+		    echo -e "\033[30;41mError: Invalid Datatype ($dtype), Sir!\033[0m"
+		    exit
+	    fi
+}
+
+
+
+table_exists() {
+	local arr=( $(find ./$current_db -maxdepth 1 -type f -printf "%f\n") )
+	local target="$1"
+	not_found=1
+
+	target=$(echo "$target" | tr '[:upper:]' '[:lower:]')
+
+	for tbl in "${arr[@]}"; do
+		tbl=$(echo "$tbl" | tr '[:upper:]' '[:lower:]')
+		if [[ "$tbl" == "$target" ]]; then
+			not_found=0
+			break
+		fi
+	done
+
+	if [[ $not_found == 1 ]]; then
+		echo -e "\033[30;41mError: Table ($target) is not found, Sir!\033[0m"
+		exit
+	fi
+}
+
+
+
+get_original_tbl_name() {
+	local arr=( $(find ./$current_db -maxdepth 1 -type f -printf "%f\n") )
+	local target="$1"
+
+	target=$(echo "$target" | tr '[:upper:]' '[:lower:]')
+
+	for tbl in "${arr[@]}"; do
+		tbl_lower=$(echo "$tbl" | tr '[:upper:]' '[:lower:]')
+		if [[ "$tbl_lower" == "$target" ]]; then
+			echo "$tbl"
+			break
+		fi
+	done
+
+}
+
+
+select_record_query=$(echo "$1" | sed -e 's/\*/'"'*'"'/g')
+select_record_lower=$(echo $select_record_query | tr '[:upper:]' '[:lower:]')
+from=$(echo $select_record_lower | awk '{print $3}')
+fields_no=$(echo $select_record_lower | awk '{ print NF }')
+where=$(echo $select_record_lower | awk '{print $5}')
+table_name=$(echo $select_record_query | awk '{print $4}')
+
+table_exists $table_name
+table_name=$(get_original_tbl_name $table_name)
+
+metadataFile=".$table_name"
+IFS=':' read -ra meta_column_names < <(sed -n '1p' "./$current_db/$metadataFile")
+IFS=':' read -ra meta_datatypes < <(sed -n '2p' "./$current_db/$metadataFile")
+IFS=':' read -ra meta_constraints < <(sed -n '3p' "./$current_db/$metadataFile")
+
+cols_csv=$(IFS=,; echo "${meta_column_names[*]}")
+
+select_record_query=$(echo "$1" | sed "s/\*/$cols_csv/g")
+
+IFS=',' read -ra column_names < <(echo $select_record_query | awk '{print $2}')
+
+if [[ $fields_no == 4 && ($select_record_lower == "select "* && $from == "from") ]]; then 
+	awk_cond='1==1'
+
+elif [[ $select_record_lower == "select "* && $from == "from" && $where == "where" ]]; then
+	cond_column=$(echo $select_record_query | awk '{print $6}')
+	column_exists meta_column_names $cond_column
+
+	cond_column_idx=$(get_column_index $metadataFile $cond_column)
+	cond_operator=$(echo $select_record_query | awk '{print $7}')
+
+	#cond_value=$(echo $select_record_query | awk '{print $8}')
+	cond_value=$(echo "$select_record_query" | awk '{for(i=8;i<=NF;i++) printf "%s%s",$i,(i<NF?" ":""); print ""}')
+	cond_val_clean="$cond_value"
+
+	cond_type=$(get_column_datatype $metadataFile $cond_column)
+
+
+awk_cond=''
+
+cond_type_lower=$(echo "$cond_type" | tr '[:upper:]' '[:lower:]')
+
+
+
+if [[ "$cond_operator" == "=" && "$cond_value" == "="* ]]; then
+    echo -e "\033[30;41mError: Invalid condition operator (==), Sir!\033[0m"
+    exit
+elif [[ "$cond_operator" == "=" && "$cond_value" == ">"* ]]; then
+    echo -e "\033[30;41mError: Invalid condition operator (=>), Sir!\033[0m"
+    exit
+elif [[ "$cond_operator" == "=" && "$cond_value" == "<"* ]]; then
+    echo -e "\033[30;41mError: Invalid condition operator (=<), Sir!\033[0m"
+    exit
+elif [[ "$cond_operator" == ">" && "$cond_value" == "<"* ]]; then
+    echo -e "\033[30;41mError: Invalid condition operator (><), Sir!\033[0m"
+    exit
+elif [[ "$cond_operator" == ">" && "$cond_value" == ">"* ]]; then
+    echo -e "\033[30;41mError: Invalid condition operator (>>), Sir!\033[0m"
+    exit
+elif [[ "$cond_operator" == "<" && "$cond_value" == "<"* ]]; then
+    echo -e "\033[30;41mError: Invalid condition operator (<<), Sir!\033[0m"
+    exit
+elif [[ "$cond_type_lower" == "int" && !("$cond_value" =~ ^-?[0-9]+$) ]];then
+	if [[ "$cond_operator" == "!=" ]]; then
+		awk_cond='1==1'
+	else 
+		awk_cond='1!=1'
+	fi
+elif [[ "$cond_type_lower" == "float" && !("$cond_value" =~ ^-?[0-9]+(\.[0-9]+)?$) ]];then
+	if [[ "$cond_operator" == "!=" ]]; then
+		awk_cond='1==1'
+	else 
+		awk_cond='1!=1'
+	fi
+elif [[ "$cond_type_lower" == "varchar" && !("$cond_value" =~ ^\'.*\'$) ]];then
+	if [[ "$cond_operator" == "!=" ]]; then
+		awk_cond='1==1'
+	else 
+		awk_cond='1!=1'
+	fi
+elif [[ "$cond_type_lower" == "varchar" && ("$cond_value" =~ ^\'.*\'$) ]];then
+	#cond_val_clean="$cond_value"
+	cond_val_clean="${cond_value%\'}"; cond_val_clean="${cond_val_clean#\'}"
+	if [[ "$cond_operator" == "!=" ]]; then
+		awk_cond='$(cond_column_idx) != cond_val_clean'
+	elif [[ "$cond_operator" == "=" ]]; then
+		awk_cond='$(cond_column_idx) == cond_val_clean'
+	else 
+		awk_cond='1!=1'
+	fi
+	
+	
+else
+
+
+	case "$cond_operator" in
+    	"=")
+		if [[ $awk_cond == "" ]]; then
+			awk_cond='$(cond_column_idx) == cond_val_clean'
+		fi
+        	;;
+    	"!=" | "<>")
+		if [[ $awk_cond == "" ]]; then
+		awk_cond='$(cond_column_idx) != cond_val_clean'
+		fi
+        	;;
+    	">")
+		if [[ $awk_cond == "" ]]; then
+		awk_cond='$(cond_column_idx) > cond_val_clean'
+		fi
+        	;;
+    	"<")
+		if [[ $awk_cond == "" ]]; then
+		awk_cond='$(cond_column_idx) < cond_val_clean'
+		fi
+        	;;
+    	">=")
+		if [[ $awk_cond == "" ]]; then
+		awk_cond='$(cond_column_idx) >= cond_val_clean'
+		fi
+        	;;
+    	"<=")
+		if [[ $awk_cond == "" ]]; then
+		awk_cond='$(cond_column_idx) <= cond_val_clean'
+		fi
+        	;;
+    	*)
+		echo -e "\033[30;41mError: Invalid condition operator ($cond_operator), Sir!\033[0m"
+        	exit
+        	;;
+	esac
+
+fi
+
+else
+	echo -e "\033[30;41mError: Check your Syntax, Sir!\033[0m"
+	exit 0
+	
+
+fi
+
+: <<'END_COMMENT'
+
+END_COMMENT
+
+
+
+	max_len=()
+
+	for col in "${meta_column_names[@]}"; do
+    		len=${#col}
+    		max_len+=("$len")
+	done
+
+
+
+
+	while IFS=":" read -ra fields; do
+    		for i in "${!fields[@]}"; do
+        	val="${fields[$i]}"
+        	len="${#val}"
+        	if (( len > max_len[i] )); then
+            		max_len[$i]=$len
+        	fi
+    		done
+	done < "./$current_db/$table_name"
+
+
+
+	disp_cols='print '
+
+	for col in "${column_names[@]}"; do
+		column_exists meta_column_names $col
+    		idx=$(get_column_index $metadataFile "$col")
+    		disp_cols+="sprintf(\"%-*s\", max[$((idx-1))], \$${idx}),"
+	done
+
+	disp_cols="${disp_cols%,}"
+
+
+	awk_len_init=""
+	for i in "${!max_len[@]}"; do
+    		awk_len_init+="max[$i]=${max_len[$i]};"
+	done
+
+
+	echo -e "\033[45m"
+
+	awk -F ":" '
+	BEGIN {
+    	OFS="  |  "
+    	'"$awk_len_init"'
+	}
+	NR==1 {
+    	'"$disp_cols"'
+	}
+	' "./$current_db/.$table_name"
+
+	echo -e "\033[44m"
+	awk -F ":" -v cond_column_idx="$cond_column_idx" -v cond_val_clean="$cond_val_clean" '
+	BEGIN {
+    	OFS="  |  "
+    	'"$awk_len_init"'
+	}
+	'"$awk_cond"' {
+    	'"$disp_cols"'
+	}
+	' "./$current_db/$table_name"
+
+	echo -e "\033[0m"
+
+        echo -e "\033[30;42mRecords selected successfully, Sir!\033[0m"
+	exit

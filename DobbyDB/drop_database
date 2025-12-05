@@ -1,0 +1,40 @@
+#!/bin/bash
+
+fullQuery="$*"
+
+read -ra words <<< "$fullQuery"
+wordCount=${#words[@]}
+
+database=0
+
+if [[ ${words[0],,} == "drop" ]]
+then
+	if [[ ${words[1],,} == "database" &&  $wordCount -eq 3 ]]
+	then
+		exist=0
+		dirs=( $(find . -maxdepth 1 -type d -printf "%f\n") )
+		for dir in ${dirs[@]}
+		do
+			if [[ "${words[2],,}" = "${dir,,}" ]]
+			then
+				exist=1
+				break
+			fi
+		done
+		if [ $exist -eq 1 ]
+		then
+			rm -r "${words[2],,}"
+			echo -e "\033[30;42mDatabase deleted successfully, Sir!\033[0m"
+		else
+			echo -e "\033[30;41mDatabase doesn't exist, Sir!\033[0m"
+		fi
+	else
+		echo -e "\033[30;41mError: Check your Syntax, Sir!\033[0m"
+	fi
+else
+	echo -e "\033[30;41mError: Check your Syntax, Sir!\033[0m"
+fi
+
+
+
+

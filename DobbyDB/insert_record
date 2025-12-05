@@ -1,0 +1,337 @@
+#!/bin/bash
+
+
+current_db="$2"
+if [[ $current_db == '' ]]; then
+	        echo -e "\033[30;41mError: Database is not selected, Sir!\033[0m"
+		exit
+fi
+
+
+
+validate_value_datatype() {
+    local datatype="$1"
+    shift
+    local value="$*"
+    datatype=$(echo "$datatype" | tr '[:upper:]' '[:lower:]')
+    case "$datatype" in
+        int)
+            if [[ "$value" =~ ^-?[0-9]+$ ]]; then
+                return 0
+            else
+		echo -e "\033[30;41mError: Value ($value) is not a valid INT, Sir!\033[0m"
+                exit 1
+            fi
+            ;;
+
+	float)
+            if [[ "$value" =~ ^-?[0-9]+(\.[0-9]+)?$ ]]; then
+                return 0
+            else
+		echo -e "\033[30;41mError: Value ($value) is not a valid Float, Sir!\033[0m"
+                exit 1
+            fi
+            ;;
+
+        varchar)
+            if [[ "$value" =~ ^\'.*\'$ ]]; then
+                return 0
+            else
+		echo -e "\033[30;41mError: Value ($value) must be single quoted for VARCHAR, Sir!\033[0m"
+                exit 1
+            fi
+            ;;
+
+        *)
+	    echo -e "\033[30;41mError: Unknown datatype ($datatype), Sir!\033[0m"
+            exit 1
+            ;;
+    esac
+}
+
+get_column_index() {
+    local metadataFile="$1"
+    local target="$2"
+    target=$(echo "$target" | tr '[:upper:]' '[:lower:]')
+
+    IFS=':' read -ra cols < <(sed -n '1p' "./$current_db/$metadataFile")
+
+    for i in "${!cols[@]}"; do
+        col="${cols[$i]}"
+        col=$(echo "$col" | tr '[:upper:]' '[:lower:]')
+
+        if [[ "$col" == "$target" ]]; then
+                echo "$((i+1))"
+            return 0
+        fi
+    done
+
+    echo -e "\033[30;41mError: Column ($target) is not found, Sir!\033[0m"
+    exit 1
+}
+
+pk_violation() {
+        local table_name="$1"
+        IFS=':' read -ra cols < <(sed -n '1p' "./$current_db/.$table_name")
+
+        for col in "${cols[@]}"; do
+                col=$(echo "$col" | tr '[:upper:]' '[:lower:]')
+                if ./is_primary_key "$col" "$table_name" "$current_db"; then
+                        pk_idx=$(get_column_index ".$table_name" $col)
+                        count_all=$(cat 123 | awk -F":" ' BEGIN {count=0} {count++} END {print count}')
+			count_distinct=$(awk -F":" -v pk_idx="$pk_idx" '
+    			{ seen[$pk_idx]++ }
+    			END { print length(seen) }
+			' "123")
+
+                        if [[ $count_all != $count_distinct ]]; then
+                                echo -e "\033[30;41mError: Primary Key Uniqueness Violation, Sir!\033[0m"
+				rm 123
+                                exit
+                        fi
+                        break
+                fi
+
+        done
+}
+
+column_exists() {
+	local -n arr="$1"
+	local target="$2"
+
+	target=$(echo "$target" | tr '[:upper:]' '[:lower:]')
+
+	for col in "${arr[@]}"; do
+		col=$(echo "$col" | tr '[:upper:]' '[:lower:]')
+		if [[ "$col" == "$target" ]]; then
+			break
+		fi
+	
+	done
+}
+
+
+table_exists() {
+	local arr=( $(find ./$current_db -maxdepth 1 -type f -printf "%f\n") )
+	local target="$1"
+	not_found=1
+
+	target=$(echo "$target" | tr '[:upper:]' '[:lower:]')
+
+	for tbl in "${arr[@]}"; do
+		tbl=$(echo "$tbl" | tr '[:upper:]' '[:lower:]')
+		if [[ "$tbl" == "$target" ]]; then
+			not_found=0
+			break
+		fi
+	done
+
+	if [[ $not_found == 1 ]]; then
+		echo -e "\033[30;41mError: Table ($target) is not found, Sir!\033[0m"
+		exit
+	fi
+}
+
+
+get_original_tbl_name() {
+	local arr=( $(find ./$current_db -maxdepth 1 -type f -printf "%f\n") )
+	local target="$1"
+
+	target=$(echo "$target" | tr '[:upper:]' '[:lower:]')
+
+	for tbl in "${arr[@]}"; do
+		tbl_lower=$(echo "$tbl" | tr '[:upper:]' '[:lower:]')
+		if [[ "$tbl_lower" == "$target" ]]; then
+			echo "$tbl"
+			break
+		fi
+	done
+
+}
+
+
+
+insert_record_query="$1"
+insert_record_lower=$(echo $insert_record_query | tr '[:upper:]' '[:lower:]')
+
+val5=$(echo $insert_record_lower | awk '{print $5}')
+val4=$(echo $insert_record_lower | awk '{print $4}')
+
+if [[ $insert_record_lower == "insert into "* && $val5 == "values" ]]; then
+	table_name=$(echo $insert_record_query | awk '{print $3}')
+	table_exists $table_name
+	table_name=$(get_original_tbl_name $table_name)
+	metadataFile=".$table_name"
+
+	IFS=':' read -ra meta_column_names < <(sed -n '1p' "./$current_db/$metadataFile")
+	IFS=':' read -ra meta_datatypes < <(sed -n '2p' "./$current_db/$metadataFile")
+	IFS=':' read -ra meta_constraints < <(sed -n '3p' "./$current_db/$metadataFile")
+
+	columns=$(echo "$insert_record_query" | awk '{ print $4 }')
+	
+	if [[ ! $columns =~ ^\(.*\)$ ]]; then
+		echo -e "\033[30;41mError: Check your Syntax, Sir!\033[0m"
+		exit
+	fi
+
+	clean=${columns#(}
+	clean=${clean%)}
+
+	IFS=',' read -ra user_column_names <<< "$clean"
+
+	#values=$(echo "$insert_record_query" | awk '{ print $6 }')
+
+	values=$(echo "$insert_record_query" | awk '{for(i=6;i<=NF;i++) printf "%s%s",$i,(i<NF?" ":""); print ""}')
+
+
+	if [[ ! $values =~ ^\(.*\)$ ]]; then
+		echo -e "\033[30;41mError: Check your Syntax, Sir!\033[0m"
+		exit
+	fi
+
+	clean=${values#(}
+	clean=${clean%)}
+
+	IFS=',' read -ra user_values <<< "$clean"
+
+	sorted_metadata_column_names=$(
+    	printf "%s\n" "${meta_column_names[@]}" |
+    	tr '[:upper:]' '[:lower:]' |
+    	sort |
+    	tr '\n' ' '
+	)
+
+	sorted_user_column_names=$(
+    	printf "%s\n" "${user_column_names[@]}" |
+    	tr '[:upper:]' '[:lower:]' |
+    	sort |
+    	tr '\n' ' '
+	)
+
+
+	if [[ "$sorted_metadata_column_names" != "$sorted_user_column_names" ]]; then
+		    echo -e "\033[30;41mError: Column mismatch, supply all columns, Sir!\033[0m"
+		        exit
+	fi
+
+
+	
+	declare -A map
+	for i in "${!user_column_names[@]}"; do
+    		key=$(echo "${user_column_names[$i]}" | tr '[:upper:]' '[:lower:]')
+    		val="${user_values[$i]}"
+    		map["$key"]="$val"
+	done
+
+
+	ordered_values=()
+	for col in "${meta_column_names[@]}"; do
+    		col_lower=$(echo "$col" | tr '[:upper:]' '[:lower:]')
+    		ordered_values+=("${map[$col_lower]}")
+	done
+
+
+	for i in "${!meta_datatypes[@]}"; do
+		dt="${meta_datatypes[$i]}"
+		val="${ordered_values[$i]}"
+		validate_value_datatype $dt $val
+
+		val_clean="${val%\"}"; val_clean="${val_clean#\"}"
+		val_clean="${val_clean%\'}"; val_clean="${val_clean#\'}"
+
+		ordered_values[$i]=$val_clean
+	done
+
+
+
+
+	touch 123
+	cat "./$current_db/$table_name" > 123
+
+	record=$(IFS=':'; echo "${ordered_values[*]}")
+	echo "$record" >> 123
+	
+	pk_violation $table_name
+
+	cat 123 > "./$current_db/$table_name"
+        rm 123
+
+	echo -e "\033[30;42mRecord inserted successfully, Sir!\033[0m"
+
+elif [[ $insert_record_lower == "insert into "* && $val4 == "values" ]]; then
+	table_name=$(echo $insert_record_query | awk '{print $3}')
+	table_exists $table_name
+	table_name=$(get_original_tbl_name $table_name)
+	metadataFile=".$table_name"
+
+	IFS=':' read -ra meta_column_names < <(sed -n '1p' "./$current_db/$metadataFile")
+	IFS=':' read -ra meta_datatypes < <(sed -n '2p' "./$current_db/$metadataFile")
+	IFS=':' read -ra meta_constraints < <(sed -n '3p' "./$current_db/$metadataFile")
+
+
+	#values=$(echo "$insert_record_query" | awk '{ print $5 }')
+
+	values=$(echo "$insert_record_query" | awk '{for(i=5;i<=NF;i++) printf "%s%s",$i,(i<NF?" ":""); print ""}')
+
+
+	if [[ ! $values =~ ^\(.*\)$ ]]; then
+		echo -e "\033[30;41mError: Check your Syntax, Sir!\033[0m"
+		exit
+	fi
+
+	clean=${values#(}
+	clean=${clean%)}
+
+	IFS=',' read -ra user_values <<< "$clean"
+
+	
+	declare -A map
+	for i in "${!meta_column_names[@]}"; do
+    	key=$(echo "${meta_column_names[$i]}" | tr '[:upper:]' '[:lower:]')
+    	val="${user_values[$i]}"
+    	map["$key"]="$val"
+	done
+
+
+
+	ordered_values=("${user_values[@]}")
+
+
+	for i in "${!meta_datatypes[@]}"; do
+    	dt="${meta_datatypes[$i]}"
+    	val="${ordered_values[$i]}"
+    	validate_value_datatype "$dt" "$val"
+    
+    	val_clean="${val%\"}"; val_clean="${val_clean#\"}"
+    	val_clean="${val_clean%\'}"; val_clean="${val_clean#\'}"
+    
+    	ordered_values[$i]=$val_clean
+	done
+
+
+
+
+	touch 123
+	cat "./$current_db/$table_name" > 123
+
+	record=$(IFS=':'; echo "${ordered_values[*]}")
+	echo "$record" >> 123
+	
+	pk_violation $table_name
+
+	cat 123 > "./$current_db/$table_name"
+        rm 123
+
+	echo -e "\033[30;42mRecord inserted successfully, Sir!\033[0m"
+	exit
+else
+	echo -e "\033[30;41mError: Invalid Insert, Provide all columns' names, Sir!\033[0m"
+	exit
+fi
+exit
+
+: <<'END_COMMENT'
+
+END_COMMENT
+
+

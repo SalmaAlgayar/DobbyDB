@@ -1,0 +1,37 @@
+#!/bin/bash
+
+fullQuery="$1"
+
+read -ra words <<< "$fullQuery"
+wordCount=${#words[@]}
+
+
+if [[ ${words[0],,} == "use" ]]
+then
+	if [[ $wordCount -eq 2 ]]
+	then
+		exist=0
+		dirs=( $(find . -maxdepth 1 -type d -printf "%f\n") )
+		for dir in ${dirs[@]}
+		do
+			if [[ "${words[1],,}" = "${dir,,}" ]]
+			then
+				exist=1
+				echo $dir
+				break
+			fi
+		done
+		if [ $exist -eq 0 ]
+		then
+			echo -e "\033[30;41mDatabase doesn't exist, Sir!\033[0m"
+		fi
+	else
+		echo -e "\033[30;41mError: Check your Syntax, Sir!\033[0m"
+	fi
+else
+	echo -e "\033[30;41mError: Check your Syntax, Sir!\033[0m"
+fi
+
+
+
+

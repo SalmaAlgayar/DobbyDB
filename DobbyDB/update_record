@@ -1,0 +1,434 @@
+#!/bin/bash
+
+current_db="$2"
+if [[ $current_db == '' ]]; then
+	echo -e "\033[30;41mError: Database is not selected, Sir!\033[0m"
+	exit
+fi
+
+
+table_exists() {
+        local arr=( $(find ./$current_db -maxdepth 1 -type f -printf "%f\n") )
+        local target="$1"
+        not_found=1
+
+        target=$(echo "$target" | tr '[:upper:]' '[:lower:]')
+
+        for tbl in "${arr[@]}"; do
+                tbl=$(echo "$tbl" | tr '[:upper:]' '[:lower:]')
+                if [[ "$tbl" == "$target" ]]; then
+                        not_found=0
+                        break
+                fi
+        done
+
+        if [[ $not_found == 1 ]]; then
+                echo -e "\033[30;41mError: Table ($target) is not found, Sir!\033[0m"
+                exit
+        fi
+}
+
+validate_value_datatype() {
+    local datatype="$1"
+    shift
+    local value="$*"
+    datatype=$(echo "$datatype" | tr '[:upper:]' '[:lower:]')
+    case "$datatype" in
+        int)
+            if [[ "$value" =~ ^-?[0-9]+$ ]]; then
+                return 0
+            else
+		echo -e "\033[30;41mError: Value ($value) is not a valid INT, Sir!\033[0m"
+                exit 1
+            fi
+            ;;
+
+	float)
+            if [[ "$value" =~ ^-?[0-9]+(\.[0-9]+)?$ ]]; then
+                return 0
+            else
+		echo -e "\033[30;41mError: Value ($value) is not a valid Float, Sir!\033[0m"
+                exit 1
+            fi
+            ;;
+
+        varchar)
+            if [[ "$value" =~ ^\'.*\'$ ]]; then
+                return 0
+            else
+		echo -e "\033[30;41mError: Value ($value) must be single quoted for VARCHAR, Sir!\033[0m"
+                exit 1
+            fi
+            ;;
+
+        *)
+	    echo -e "\033[30;41mError: Unknown datatype ($datatype), Sir!\033[0m"
+            exit 1
+            ;;
+    esac
+}
+
+
+pk_violation() {
+        local table_name="$1"
+        IFS=':' read -ra cols < <(sed -n '1p' "./$current_db/.$table_name")
+
+        for col in "${cols[@]}"; do
+                col=$(echo "$col" | tr '[:upper:]' '[:lower:]')
+                if ./is_primary_key "$col" "$table_name" "$current_db"; then
+                        pk_idx=$(get_column_index ".$table_name" $col)
+                        count_all=$(cat 123 | awk -F":" ' BEGIN {count=0} {count++} END {print count}')
+                        count_distinct=$(awk -F":" -v pk_idx="$pk_idx" '
+                        { seen[$pk_idx]++ }
+                        END { print length(seen) }
+                        ' "123")
+
+                        if [[ $count_all != $count_distinct ]]; then
+                                echo -e "\033[30;41mError: Primary Key Uniqueness Violation, Sir!\033[0m"
+                                rm 123
+                                exit
+                        fi
+                        break
+                fi
+
+        done
+}
+
+
+
+
+get_column_datatype() {
+    local metadataFile="$1"
+    local target="$2"
+
+    target=$(echo "$target" | tr '[:upper:]' '[:lower:]')
+    IFS=':' read -ra cols < <(sed -n '1p' "./$current_db/$metadataFile")
+
+    IFS=':' read -ra types < <(sed -n '2p' "./$current_db/$metadataFile")
+
+    for i in "${!cols[@]}"; do
+        col="${cols[$i]}"
+        col=$(echo "$col" | tr '[:upper:]' '[:lower:]')
+
+        if [[ "$col" == "$target" ]]; then
+            echo "${types[$i]}"
+            return 0
+        fi
+    done
+
+    echo -e "\033[30;41mError: Column ($target) not found, Sir!"
+    exit 1
+}
+
+
+
+
+get_column_index() {
+    local metadataFile="$1"
+    local target="$2"
+    target=$(echo "$target" | tr '[:upper:]' '[:lower:]')
+
+    IFS=':' read -ra cols < <(sed -n '1p' "./$current_db/$metadataFile")
+
+    for i in "${!cols[@]}"; do
+        col="${cols[$i]}"
+        col=$(echo "$col" | tr '[:upper:]' '[:lower:]')
+
+	if [[ "$col" == ' ' || "$col" == '' ]];then
+		echo -e "\033[30;41mError: Column ($target) not found, Sir!\033[0m"
+		break
+		exit
+	fi
+
+        if [[ "$col" == "$target" ]]; then
+		echo "$((i+1))"
+		return 0
+        fi
+    done
+
+    echo -e "\033[30;41mError: Column ($target) not found, Sir!\033[0m"
+    exit
+}
+
+
+
+column_exists() {
+        local -n arr="$1"
+        local target="$2"
+        local not_found=1
+
+
+        target=$(echo "$target" | tr '[:upper:]' '[:lower:]')
+
+        for col in "${arr[@]}"; do
+                col=$(echo "$col" | tr '[:upper:]' '[:lower:]')
+                if [[ "$col" == "$target" ]]; then
+                        not_found=0
+                        break
+                fi
+
+        done
+        if [[ $not_found == 1 ]]; then
+		echo -e "\033[30;41mError: Column ($target) not found, Sir!\033[0m"
+                exit
+        fi
+}
+
+
+
+is_valid_datatype() {
+	    local dtype="$1"
+	    dtype="${dtype,,}"
+	    if [[ ! ("$dtype" == "int" || "$dtype" == "varchar") ]]; then
+		    echo -e "\033[30;41mError: Invalid Datatype ($dtype), Sir!\033[0m"
+		    exit
+	    fi
+		}
+
+
+get_original_tbl_name() {
+	local arr=( $(find ./$current_db -maxdepth 1 -type f -printf "%f\n") )
+	local target="$1"
+
+	target=$(echo "$target" | tr '[:upper:]' '[:lower:]')
+
+	for tbl in "${arr[@]}"; do
+		tbl_lower=$(echo "$tbl" | tr '[:upper:]' '[:lower:]')
+		if [[ "$tbl_lower" == "$target" ]]; then
+			echo "$tbl"
+			break
+		fi
+	done
+
+}
+
+update_record_query="$1"
+update_record_lower=$(echo $update_record_query | tr '[:upper:]' '[:lower:]')
+
+where=$(echo $update_record_lower | awk '{print $7}')
+
+if [[ $update_record_lower == "update "* && ($update_record_lower =~ [sS][eE][tT] && $update_record_lower =~ [wW][hH][eE][rR][eE]) ]]; then
+	between_set_where=$(echo "$update_record_query" | sed -E 's/.*set[[:space:]]+(.*)[[:space:]]+where.*/\1/i')
+	after_where=$(echo "$update_record_query" | sed -E 's/.*where[[:space:]]+(.*)$/\1/i')
+
+
+	table_name=$(echo $update_record_query | awk '{print $2}')
+	table_exists $table_name
+	table_name=$(get_original_tbl_name $table_name)
+
+	metadataFile=".$table_name"
+
+	IFS=':' read -ra meta_column_names < <(sed -n '1p' "./$current_db/$metadataFile")
+	IFS=':' read -ra meta_datatypes < <(sed -n '2p' "./$current_db/$metadataFile")
+	IFS=':' read -ra meta_constraints < <(sed -n '3p' "./$current_db/$metadataFile")
+
+	set_column=$(echo $between_set_where | awk '{print $1}')
+
+	column_exists meta_column_names $set_column
+	set_column_idx=$(get_column_index $metadataFile $set_column)
+	set_column_datatype=$(get_column_datatype $metadataFile $set_column)
+
+	set_operator=$(echo "$between_set_where" | awk '{print $2}')
+
+	set_value=$(echo "$between_set_where" | awk '{for(i=3;i<=NF;i++) printf "%s%s",$i,(i<NF?" ":""); print ""}')
+
+	validate_value_datatype $set_column_datatype $set_value
+	
+	set_val_clean="${set_value%\'}"; set_val_clean="${set_val_clean#\'}"
+
+	case "$set_operator" in
+    	"=")
+		awk_set='$(set_column_idx) = set_val_clean'
+        	;;
+    	*)
+		echo -e "\033[30;41mError: Invalid set operator ($set_operator), Sir!\033[0m"
+        	exit 1
+        	;;
+	esac
+
+
+        cond_column=$(echo "$after_where" | awk '{print $1}')
+	column_exists meta_column_names $cond_column
+
+	cond_column_idx=$(get_column_index $metadataFile $cond_column)
+	cond_operator=$(echo "$after_where" | awk '{print $2}')
+	cond_value=$(echo "$after_where" | awk '{for(i=3;i<=NF;i++) printf "%s%s",$i,(i<NF?" ":""); print ""}')
+	cond_val_clean="$cond_value"
+
+	cond_type=$(get_column_datatype $metadataFile $cond_column)
+
+awk_cond=''
+
+
+cond_type_lower=$(echo "$cond_type" | tr '[:upper:]' '[:lower:]')
+
+
+
+
+
+
+if [[ "$cond_operator" == "=" && "$cond_value" == "="* ]]; then
+    echo -e "\033[30;41mError: Invalid condition operator (==), Sir!\033[0m"
+    exit
+elif [[ "$cond_operator" == "=" && "$cond_value" == ">"* ]]; then
+    echo -e "\033[30;41mError: Invalid condition operator (=>), Sir!\033[0m"
+    exit
+elif [[ "$cond_operator" == "=" && "$cond_value" == "<"* ]]; then
+    echo -e "\033[30;41mError: Invalid condition operator (=<), Sir!\033[0m"
+    exit
+elif [[ "$cond_operator" == ">" && "$cond_value" == "<"* ]]; then
+    echo -e "\033[30;41mError: Invalid condition operator (><), Sir!\033[0m"
+    exit
+elif [[ "$cond_operator" == ">" && "$cond_value" == ">"* ]]; then
+    echo -e "\033[30;41mError: Invalid condition operator (>>), Sir!\033[0m"
+    exit
+elif [[ "$cond_operator" == "<" && "$cond_value" == "<"* ]]; then
+    echo -e "\033[30;41mError: Invalid condition operator (<<), Sir!\033[0m"
+    exit
+elif [[ "$cond_type_lower" == "int" && !("$cond_value" =~ ^-?[0-9]+$) ]];then
+	if [[ "$cond_operator" == "!=" ]]; then
+		awk_cond='1==1'
+	else 
+		awk_cond='1!=1'
+	fi
+elif [[ "$cond_type_lower" == "float" && !("$cond_value" =~ ^-?[0-9]+(\.[0-9]+)?$) ]];then
+	if [[ "$cond_operator" == "!=" ]]; then
+		awk_cond='1==1'
+	else 
+		awk_cond='1!=1'
+	fi
+elif [[ "$cond_type_lower" == "varchar" && !("$cond_value" =~ ^\'.*\'$) ]];then
+	if [[ "$cond_operator" == "!=" ]]; then
+		awk_cond='1==1'
+	else 
+		awk_cond='1!=1'
+	fi
+elif [[ "$cond_type_lower" == "varchar" && ("$cond_value" =~ ^\'.*\'$) ]];then
+	#cond_val_clean="$cond_value"
+	cond_val_clean="${cond_value%\'}"; cond_val_clean="${cond_val_clean#\'}"
+	if [[ "$cond_operator" == "!=" ]]; then
+		awk_cond='$(cond_column_idx) != cond_val_clean'
+	elif [[ "$cond_operator" == "=" ]]; then
+		awk_cond='$(cond_column_idx) == cond_val_clean'
+	else 
+		awk_cond='1!=1'
+	fi
+	
+	
+else
+
+	case "$cond_operator" in
+    	"=")
+		if [[ $awk_cond == "" ]]; then
+			awk_cond='$(cond_column_idx) == cond_val_clean'
+		fi
+        	;;
+    	"!=" | "<>")
+		if [[ $awk_cond == "" ]]; then
+		awk_cond='$(cond_column_idx) != cond_val_clean'
+		fi
+        	;;
+    	">")
+		if [[ $awk_cond == "" ]]; then
+		awk_cond='$(cond_column_idx) > cond_val_clean'
+		fi
+        	;;
+    	"<")
+		if [[ $awk_cond == "" ]]; then
+		awk_cond='$(cond_column_idx) < cond_val_clean'
+		fi
+        	;;
+    	">=")
+		if [[ $awk_cond == "" ]]; then
+		awk_cond='$(cond_column_idx) >= cond_val_clean'
+		fi
+        	;;
+    	"<=")
+		if [[ $awk_cond == "" ]]; then
+		awk_cond='$(cond_column_idx) <= cond_val_clean'
+		fi
+        	;;
+    	*)
+		echo -e "\033[30;41mError: Invalid condition operator ($cond_operator), Sir!\033[0m"
+        	exit
+        	;;
+	esac
+
+fi
+
+elif [[ $update_record_lower == "update "* && $update_record_lower =~ [sS][eE][tT] ]]; then
+	table_name=$(echo $update_record_query | awk '{print $2}')
+	table_exists $table_name
+	table_name=$(get_original_tbl_name $table_name)
+	metadataFile=".$table_name"
+
+	IFS=':' read -ra meta_column_names < <(sed -n '1p' "./$current_db/$metadataFile")
+	IFS=':' read -ra meta_datatypes < <(sed -n '2p' "./$current_db/$metadataFile")
+	IFS=':' read -ra meta_constraints < <(sed -n '3p' "./$current_db/$metadataFile")
+
+
+	set_column=$(echo $update_record_query | awk '{print $4}')
+	column_exists meta_column_names $set_column
+
+
+	set_column_idx=$(get_column_index $metadataFile $set_column)
+
+
+	set_column_datatype=$(get_column_datatype $metadataFile $set_column)
+
+	set_operator=$(echo $update_record_query | awk '{print $5}')
+
+
+	#set_value=$(echo $update_record_query | awk '{print $6}')
+
+	set_value=$(echo "$update_record_query" | awk '{for(i=6;i<=NF;i++) printf "%s%s",$i,(i<NF?" ":""); print ""}')
+	set_val_clean="$set_value"
+	
+	
+
+
+        validate_value_datatype $set_column_datatype $set_value
+	
+	set_val_clean="${set_value%\'}"; set_val_clean="${set_val_clean#\'}"
+
+	
+	case "$set_operator" in
+    	"=")
+		awk_set='$(set_column_idx) = set_val_clean'
+        	;;
+    	*)
+		echo -e "\033[30;41mError: Invalid set operator ($set_operator), Sir!\033[0m"
+        	exit 1
+        	;;
+	esac
+
+	awk_cond='1 == 1'
+else
+	echo -e "\033[30;41mError: Check your Syntax, Sir!\033[0m"
+	exit
+fi
+
+touch 123
+
+awk -F ":" -v cond_column_idx="$cond_column_idx" -v cond_val_clean="$cond_val_clean" -v set_column_idx="$set_column_idx" -v set_val_clean="$set_val_clean" 'BEGIN { OFS=":" }
+{
+if ('"$awk_cond"') {
+       '"$awk_set"'
+    	}
+    print
+}' "./$current_db/$table_name" > 123
+
+pk_violation $table_name
+
+cat 123 > "./$current_db/$table_name"
+rm 123
+echo -e "\033[30;42mRecords updated successfully, Sir!\033[0m"
+exit
+
+: <<'END_COMMENT'
+
+END_COMMENT
+
+
+
+
