@@ -1,7 +1,7 @@
 # DobbyDB
 <img width="1920" height="1080" alt="DobbyDB (Presentation)" src="https://github.com/user-attachments/assets/20fa44c4-9bf5-484b-9361-e901ba42c053" />
 
-- Dobby has started to craft his very own DBMS.
+- Dobby has started to craft its very own DBMS.
 - Dobby has tried its best in building the DB, although it ran out of time a little bit and didn't have the chance to develop all the ideas in its imagination. But Dobby acknowledges that it enjoyed every single piece of that project.
 - Dobby followed the ANSI SQL syntax at its most simple version.
 - Dobby goes smoothly with 'INT', 'FLOAT', and 'VARCHAR' case insensitive datatypes, only, with no specified maximum.
